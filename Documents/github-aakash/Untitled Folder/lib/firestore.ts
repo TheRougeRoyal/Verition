@@ -1,5 +1,7 @@
-import dbConnect from './mongodb'
 import mongoose from 'mongoose'
+import dbConnect from './mongodb'
+import { User } from './models/User'
+import { ApiKey } from './models/ApiKey'
 
 export async function getDocById(collectionName: string, id: string) {
   await dbConnect()
@@ -27,7 +29,7 @@ export async function updateDocById(collectionName: string, id: string, data: an
   return await Collection.findByIdAndUpdate(id, data, { new: true }).lean()
 }
 
-export async function deleteDocById(collectionName: string, id: string) {
+export async function deleteDocById(collectionName: string, id: string, data: any) {
   await dbConnect()
   const Collection = mongoose.model(collectionName)
   return await Collection.findByIdAndDelete(id).lean()

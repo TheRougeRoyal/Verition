@@ -1,19 +1,38 @@
-import { SignJWT, jwtVerify } from 'jose'
+import { SignJWT, jwtVerify, JWTPayload } from 'jose'
 
-const JWT_SECRET = new TextEncoder().encode(process.env.JWT_SECRET || 'default-secret-change-me')
+export interface SessionPayload extends JWTPayload {
+  userId: string
+  email: string
+}
 
-export async function createSessionToken(payload: any) {
+let cachedSecret: Uint8Array | null = null
+
+function getJwtSecret(): Uint8Array {
+  if (cachedSecret) return cachedSecret
+
+  const secret = process.env.JWT_SECRET
+  if (!secret || secret.length < 32) {
+    throw new Error('JWT_SECRET must be defined and at least 32 characters long')
+  }
+
+  cachedSecret = new TextEncoder().encode(secret)
+  return cachedSecret
+}
+
+export async function createSessionToken(payload: SessionPayload) {
   return await new SignJWT(payload)
     .setProtectedHeader({ alg: 'HS256' })
     .setIssuedAt()
     .setExpirationTime('24h')
-    .sign(JWT_SECRET)
+    .sign(getJwtSecret())
 }
 
-export async function verifySessionToken(token: string) {
+export async function verifySessionToken(token: string): Promise<SessionPayload | null> {
   try {
-    const { payload } = await jwtVerify(token, JWT_SECRET)
-    return payload
+    const { payload } = await jwtVerify(token, getJwtSecret(), {
+      algorithms: ['HS256']
+    })
+    return payload as unknown as SessionPayload
   } catch (e) {
     return null
   }

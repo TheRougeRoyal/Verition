@@ -1,35 +1,55 @@
 import { NextResponse } from 'next/server'
+import bcrypt from 'bcryptjs'
+import dbConnect from '@/lib/mongodb'
+import { User } from '@/lib/models/User'
+import { validateAuthInput } from '@/lib/auth-validation'
+import { setSessionCookie } from '@/lib/session'
 import { createSessionToken } from '@/lib/verify-token'
-import { createDoc } from '@/lib/firestore'
+import { rateLimit } from '@/lib/rate-limit'
+import { logError } from '@/lib/logger'
 
 export async function POST(request: Request) {
   try {
     const body = await request.json()
-    const { email, password, name } = body
+    const { error, data } = validateAuthInput(body)
+    if (error) return NextResponse.json({ error: 'Invalid input' }, { status: 400 })
 
-    if (!email || !password) {
-      return NextResponse.json({ error: 'Email and password are required' }, { status: 400 })
+    const ip = request.headers.get('x-forwarded-for')?.split(',')[0] || 'unknown'
+    const limit = rateLimit(ip, 'signup')
+    if (!limit.allowed) {
+      return NextResponse.json(
+        { error: 'Too many attempts. Please try again later.' },
+        { status: 429, headers: { 'Retry-After': String(limit.reset) } }
+      )
     }
 
-    // ponytail: real password hashing would happen via Firebase or bcrypt
-    const user = await createDoc('users', {
-      email,
-      name,
-      createdAt: new Date(),
+    await dbConnect()
+    const existingUser = await User.findOne({ email: data.email })
+    if (existingUser) {
+      return NextResponse.json({ error: 'Email already in use' }, { status: 409 })
+    }
+
+    const passwordHash = await bcrypt.hash(data.password, 12)
+    const user = await User.create({
+      email: data.email,
+      name: data.name,
+      passwordHash,
     })
 
-    const token = await createSessionToken({ userId: user.id, email: user.email })
-
-    const response = NextResponse.json({ user }, { status: 201 })
-    response.cookies.set('session', token, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'lax',
-      maxAge: 60 * 60 * 24,
+    const token = await createSessionToken({
+      userId: String(user._id),
+      email: user.email
     })
 
+    const response = NextResponse.json({
+      user: { id: String(user._id), email: user.email, name: user.name }
+    }, { status: 201 })
+
+    await setSessionCookie(response, token)
     return response
+
   } catch (e) {
+    logError('auth/signup', e)
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
   }
 }

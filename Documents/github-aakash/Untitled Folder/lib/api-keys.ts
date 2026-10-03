@@ -1,6 +1,19 @@
 import crypto from 'crypto'
 
-const API_KEY_HASH_SECRET = process.env.API_KEY_HASH_SECRET || 'default-hash-secret'
+let cachedHashSecret: string | null = null
+
+function getApiKeyHashSecret(): string {
+  if (cachedHashSecret) return cachedHashSecret
+
+  const secret = process.env.API_KEY_HASH_SECRET
+  if (!secret || secret.length < 32) {
+    throw new Error('API_KEY_HASH_SECRET must be defined and at least 32 characters long')
+  }
+
+  cachedHashSecret = secret
+  return cachedHashSecret
+}
+
 const API_KEY_PREFIX = process.env.API_KEY_PREFIX || 'sk_'
 
 export function generateApiKey() {
@@ -8,7 +21,7 @@ export function generateApiKey() {
   const key = `${API_KEY_PREFIX}${randomBytes}`
 
   const hash = crypto
-    .createHmac('sha256', API_KEY_HASH_SECRET)
+    .createHmac('sha256', getApiKeyHashSecret())
     .update(key)
     .digest('hex')
 
@@ -18,10 +31,17 @@ export function generateApiKey() {
 }
 
 export function verifyApiKey(providedKey: string, storedHash: string) {
-  const hash = crypto
-    .createHmac('sha256', API_KEY_HASH_SECRET)
+  const providedHash = crypto
+    .createHmac('sha256', getApiKeyHashSecret())
     .update(providedKey)
     .digest('hex')
 
-  return hash === storedHash
+  const providedHashBuffer = Buffer.from(providedHash, 'hex')
+  const storedHashBuffer = Buffer.from(storedHash, 'hex')
+
+  if (providedHashBuffer.length !== storedHashBuffer.length) {
+    return false
+  }
+
+  return crypto.timingSafeEqual(providedHashBuffer, storedHashBuffer)
 }
